@@ -99,3 +99,27 @@ div.command {
 margin-top: 15px;
 }
 
+.spoiler {
+  border: 1px solid #999;
+  padding: 2px;
+  background: #f1f1f1;
+}
+
+.spoiler:hover {
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.125);
+}
+
+.spoiler-body {
+  display: none;
+}
+.spoiler.instant.expanded .spoiler-body {
+  display: block;
+}
+
+#content {
+  max-height: 640px;
+  width: 100%;
+  max-width: 570px;
+  margin: 0 auto;
+}
