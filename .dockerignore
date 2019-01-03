@@ -2,3 +2,6 @@
 charts
 examples
 docs
+.dockerignore
+.editorconfig
+.gitignore
