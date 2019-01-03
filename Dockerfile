@@ -1,10 +1,15 @@
-FROM golang:1.10.3-alpine3.8
+FROM golang:1.11.4-alpine3.8 as builder
 
-RUN apk add --no-cache --update alpine-sdk bash
+ENV GO111MODULE on
+ENV PROJECT_NAME dex-k8s-authenticator
 
-COPY . /go/src/github.com/mintel/dex-k8s-authenticator
-WORKDIR /go/src/github.com/mintel/dex-k8s-authenticator
-RUN make get && make 
+RUN apk add --no-cache --update git
+
+WORKDIR /go/src/${PROJECT_NAME}
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o bin/${PROJECT_NAME}
 
 FROM alpine:3.8
 # Dex connectors, such as GitHub and Google logins require root certificates.
@@ -12,22 +17,22 @@ FROM alpine:3.8
 # experience when this doesn't work out of the box.
 #
 # OpenSSL is required so wget can query HTTPS endpoints for health checking.
-RUN apk add --update ca-certificates openssl curl
+RUN apk add --no-cache --update ca-certificates openssl curl
 
-RUN mkdir -p /app/bin
-COPY --from=0 /go/src/github.com/mintel/dex-k8s-authenticator/bin/dex-k8s-authenticator /app/bin/dex-k8s-authenticator
-COPY --from=0 /go/src/github.com/mintel/dex-k8s-authenticator/html /app/html
-COPY --from=0 /go/src/github.com/mintel/dex-k8s-authenticator/templates /app/templates
+WORKDIR /app
+
+RUN mkdir -p bin
+COPY --from=builder /go/src/dex-k8s-authenticator/bin/dex-k8s-authenticator bin/dex-k8s-authenticator
+COPY --from=builder /go/src/dex-k8s-authenticator/html html
+COPY --from=builder /go/src/dex-k8s-authenticator/templates templates
 
 # Add any required certs/key by mounting a volume on /certs - Entrypoint will copy them and run update-ca-certificates at startup
 RUN mkdir -p /certs
 
-WORKDIR /app
+COPY entrypoint.sh bin/
+RUN chmod a+x bin/entrypoint.sh
 
-COPY entrypoint.sh /
-RUN chmod a+x /entrypoint.sh
-
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/app/bin/entrypoint.sh"]
 
 CMD ["--help"]
 
