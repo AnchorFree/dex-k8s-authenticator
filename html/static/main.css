@@ -12,7 +12,9 @@ h3 { font-size: 16px; }
 pre {
   background-color: #eff0f1;
   padding: 5px;
-  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 .dex-container {
