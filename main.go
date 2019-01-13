@@ -6,6 +6,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -138,6 +141,24 @@ func start_app(config Config) {
 		config.Web_Path_Prefix = web_path_prefix
 	}
 
+	// Counter for login requests
+	loginCounter := promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "dex_k8s_authenticator_login_requests_total",
+			Help: "Total number of login requests by HTTP status code, method and cluster.",
+		},
+		[]string{"code", "cluster"},
+	)
+
+	// Counter for callback response
+	callbackCounter := promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "dex_k8s_authenticator_callback_response_total",
+			Help: "Total number of callback response by HTTP status code, method and cluster.",
+		},
+		[]string{"code", "cluster"},
+	)
+
 	// Generate handlers for each cluster
 	for i, _ := range config.Clusters {
 		cluster := config.Clusters[i]
@@ -199,24 +220,57 @@ func start_app(config Config) {
 			os.Exit(1)
 		}
 
-		// Each cluster gets a different login and callback URL
-		http.HandleFunc(base_redirect_uri.Path, cluster.handleCallback)
+		// Cluster Label for Metrics
+		clusterLabel := prometheus.Labels{"cluster": cluster.Name}
+
+		// Each cluster gets a different callback URL
+		http.HandleFunc(base_redirect_uri.Path,
+			promhttp.InstrumentHandlerCounter(
+				loginCounter.MustCurryWith(clusterLabel),
+				http.HandlerFunc(cluster.handleCallback),
+			),
+		)
 		log.Printf("Registered callback handler at: %s", base_redirect_uri.Path)
 
+		// Each cluster gets a different login URL
 		login_uri := path.Join(config.Web_Path_Prefix, "login", cluster.Name)
-		http.HandleFunc(login_uri, cluster.handleLogin)
+		http.HandleFunc(login_uri,
+			promhttp.InstrumentHandlerCounter(
+				callbackCounter.MustCurryWith(clusterLabel),
+				http.HandlerFunc(cluster.handleLogin),
+			),
+		)
 		log.Printf("Registered login handler at: %s", login_uri)
 	}
 
 	// Index page
-	http.HandleFunc(config.Web_Path_Prefix, config.handleIndex)
+	indexHandler := promhttp.InstrumentHandlerCounter(
+		promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "dex_k8s_authenticator_index_requests_total",
+				Help: "Total number of index requests by HTTP status code.",
+			},
+			[]string{"code", "method"},
+		),
+		http.HandlerFunc(config.handleIndex),
+	)
+	http.HandleFunc(config.Web_Path_Prefix, indexHandler)
+	log.Printf("Registered index handler at: %s", config.Web_Path_Prefix)
 
 	// Serve static html assets
 	fs := http.FileServer(http.Dir("html/static/"))
 	static_uri := path.Join(config.Web_Path_Prefix, "static") + "/"
+	http.Handle(static_uri, http.StripPrefix(static_uri, fs))
 	log.Printf("Registered static assets handler at: %s", static_uri)
 
-	http.Handle(static_uri, http.StripPrefix(static_uri, fs))
+	// Export metrics for prometheus
+	http.Handle("/metrics", promhttp.Handler())
+	log.Printf("Registered metrics handler at: %s", "/metrics")
+
+	// Register health check endpoint
+	healthzPattern := path.Join(config.Web_Path_Prefix, "healthz")
+	http.HandleFunc(healthzPattern, config.handleHealthz)
+	log.Printf("Registered healthz handler at: %s", healthzPattern)
 
 	// Determine whether to use TLS or not
 	switch listenURL.Scheme {
@@ -302,7 +356,6 @@ var RootCmd = &cobra.Command{
 
 		// Fallback if no args specified
 		cmd.HelpFunc()(cmd, args)
-
 	},
 }
 
