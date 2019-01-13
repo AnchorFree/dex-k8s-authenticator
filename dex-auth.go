@@ -29,6 +29,14 @@ func (config *Config) handleIndex(w http.ResponseWriter, r *http.Request) {
 	renderIndex(w, config)
 }
 
+func (config *Config) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write([]byte(`{"status": "ok"}`)); err != nil {
+		log.Printf("error in response writing: %#v", err)
+	}
+}
+
 func (cluster *Cluster) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var scopes []string
 
